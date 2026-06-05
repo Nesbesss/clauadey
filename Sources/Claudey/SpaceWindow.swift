@@ -1,13 +1,25 @@
 import Cocoa
 import SwiftTerm
 
-// Container view that tiles its panes in a grid and re-lays on resize.
+// Premium palette (Warp-like: deep slate, crisp text, one warm accent).
+private enum Palette {
+    static let windowTop = NSColor(srgbRed: 0.075, green: 0.082, blue: 0.098, alpha: 1)   // #131520
+    static let windowBot = NSColor(srgbRed: 0.051, green: 0.055, blue: 0.067, alpha: 1)   // #0d0e11
+    static let pane      = NSColor(srgbRed: 0.086, green: 0.102, blue: 0.129, alpha: 0.97) // #161a21
+    static let header    = NSColor(srgbRed: 0.11,  green: 0.13,  blue: 0.16,  alpha: 0.96)
+    static let fg        = NSColor(srgbRed: 0.91,  green: 0.92,  blue: 0.94,  alpha: 1)
+    static let muted     = NSColor(srgbRed: 0.56,  green: 0.59,  blue: 0.65,  alpha: 1)
+    static let accent    = NSColor(srgbRed: 0.85,  green: 0.46,  blue: 0.34,  alpha: 1)    // #d97757
+    static let border    = NSColor(white: 1, alpha: 0.07)
+}
+
+// Tiles panes in a grid; reserves space at top for the transparent titlebar.
 final class GridContainer: NSView {
     var panes: [NSView] = []
-    let gap: CGFloat = 12
+    let gap: CGFloat = 14
+    let topInset: CGFloat = 30
 
-    override var isFlipped: Bool { true } // top-left origin → first pane top-left
-
+    override var isFlipped: Bool { true }
     override func resizeSubviews(withOldSize oldSize: NSSize) { layoutPanes() }
     override func layout() { super.layout(); layoutPanes() }
 
@@ -16,41 +28,44 @@ final class GridContainer: NSView {
         guard n > 0, bounds.width > 1, bounds.height > 1 else { return }
         let cols = Int(ceil(Double(n).squareRoot()))
         let rows = Int(ceil(Double(n) / Double(cols)))
-        let cw = (bounds.width - gap * CGFloat(cols + 1)) / CGFloat(cols)
-        let ch = (bounds.height - gap * CGFloat(rows + 1)) / CGFloat(rows)
+        let availW = bounds.width
+        let availH = bounds.height - topInset
+        let cw = (availW - gap * CGFloat(cols + 1)) / CGFloat(cols)
+        let ch = (availH - gap * CGFloat(rows + 1)) / CGFloat(rows)
         for (i, p) in panes.enumerated() {
             let r = i / cols, c = i % cols
             p.frame = NSRect(x: gap + CGFloat(c) * (cw + gap),
-                             y: gap + CGFloat(r) * (ch + gap),
+                             y: topInset + gap + CGFloat(r) * (ch + gap),
                              width: cw, height: ch)
         }
     }
 }
 
-// A single Claudey window holding N terminal panes, each running `claude`.
-// Glassy, minimalist, gray.
+// A single Claudey window holding N premium terminal panes running `claude`.
 final class SpaceWindowController: NSWindowController, NSWindowDelegate {
     private let grid = GridContainer()
     private var terms: [LocalProcessTerminalView] = []
+    private var cards: [NSView] = []
+    private var clickMonitor: Any?
     var onClose: ((SpaceWindowController) -> Void)?
 
     convenience init(cwd: String, shellCmd: String, count: Int) {
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 740),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 760),
                            styleMask: [.titled, .closable, .resizable,
                                        .miniaturizable, .fullSizeContentView],
                            backing: .buffered, defer: false)
-        win.title = "Claudey — \((cwd as NSString).lastPathComponent)"
+        win.title = "Claudey"
         win.titlebarAppearsTransparent = true
-        win.titleVisibility = .visible
-        win.isMovableByWindowBackground = false
-        win.minSize = NSSize(width: 540, height: 360)
+        win.titleVisibility = .hidden
+        win.minSize = NSSize(width: 560, height: 380)
         win.appearance = NSAppearance(named: .darkAqua)
+        win.isOpaque = false
         win.backgroundColor = .clear
 
         self.init(window: win)
         win.delegate = self
 
-        // Gray glass backing for the whole window.
+        // Subtle translucency behind a deep slate gradient → premium, not busy.
         let blur = NSVisualEffectView(frame: win.contentView!.bounds)
         blur.autoresizingMask = [.width, .height]
         blur.material = .underWindowBackground
@@ -58,52 +73,141 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
         blur.state = .active
         win.contentView = blur
 
+        let tint = NSView(frame: blur.bounds)
+        tint.autoresizingMask = [.width, .height]
+        tint.wantsLayer = true
+        let grad = CAGradientLayer()
+        grad.frame = blur.bounds
+        grad.colors = [Palette.windowTop.cgColor, Palette.windowBot.cgColor]
+        grad.startPoint = CGPoint(x: 0, y: 0)
+        grad.endPoint = CGPoint(x: 1, y: 1)
+        tint.layer = grad
+        tint.layer?.opacity = 0.92
+        blur.addSubview(tint)
+
         grid.frame = blur.bounds
         grid.autoresizingMask = [.width, .height]
         blur.addSubview(grid)
 
+        let folder = (cwd as NSString).lastPathComponent
         let env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         for _ in 0..<max(1, count) {
-            let pane = makePane()
-            grid.addSubview(pane.card)
-            terms.append(pane.term)
-            // Login shell so PATH has `claude`; run command, then keep shell open.
-            pane.term.startProcess(executable: "/bin/zsh",
-                                   args: ["-l", "-c", shellCmd + "; exec /bin/zsh -l"],
-                                   environment: env,
-                                   currentDirectory: cwd)
+            let (card, term) = makePane(folder: folder)
+            grid.addSubview(card)
+            cards.append(card)
+            terms.append(term)
+            term.startProcess(executable: "/bin/zsh",
+                              args: ["-l", "-c", shellCmd + "; exec /bin/zsh -l"],
+                              environment: env,
+                              currentDirectory: cwd)
         }
-        grid.panes = terms.indices.map { grid.subviews[$0] }
+        grid.panes = cards
         grid.layoutPanes()
         win.center()
+
+        // Active-pane accent ring: highlight the card under each click.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+            self?.highlightPane(at: e)
+            return e
+        }
+        highlightCard(cards.first)
     }
 
-    // One rounded translucent gray card wrapping a transparent terminal.
-    private func makePane() -> (card: NSView, term: LocalProcessTerminalView) {
-        let card = NSVisualEffectView(frame: .zero)
-        card.material = .hudWindow
-        card.blendingMode = .behindWindow
-        card.state = .active
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 12
-        card.layer?.masksToBounds = true
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor(white: 1, alpha: 0.07).cgColor
+    private func highlightPane(at event: NSEvent) {
+        guard event.window === window else { return }
+        let p = grid.convert(event.locationInWindow, from: nil)
+        if let hit = cards.first(where: { $0.frame.contains(p) }) { highlightCard(hit) }
+    }
 
-        let term = LocalProcessTerminalView(frame: card.bounds)
-        term.autoresizingMask = [.width, .height]
-        // Slightly tinted so text stays readable while the gray glass shows through.
-        term.nativeBackgroundColor = NSColor(white: 0.11, alpha: 0.55)
-        term.nativeForegroundColor = NSColor(white: 0.92, alpha: 1)
-        term.wantsLayer = true
-        term.layer?.isOpaque = false
-        card.addSubview(term)
+    private func highlightCard(_ active: NSView?) {
+        for c in cards {
+            let on = c === active
+            c.layer?.borderColor = (on ? Palette.accent.withAlphaComponent(0.75)
+                                       : Palette.border).cgColor
+            c.layer?.borderWidth = on ? 1.6 : 1
+        }
+    }
+
+    // Rounded slate card: header (folder label) + padded terminal, with depth.
+    private func makePane(folder: String) -> (card: NSView, term: LocalProcessTerminalView) {
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 14
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = Palette.border.cgColor
+        card.layer?.shadowColor = NSColor.black.cgColor
+        card.layer?.shadowOpacity = 0.40
+        card.layer?.shadowRadius = 18
+        card.layer?.shadowOffset = CGSize(width: 0, height: -5)
+
+        // Clipped inner so rounded corners hold while the card casts a shadow.
+        let clip = NSView()
+        clip.wantsLayer = true
+        clip.layer?.cornerRadius = 14
+        clip.layer?.masksToBounds = true
+        clip.layer?.backgroundColor = Palette.pane.cgColor
+        clip.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(clip)
+
+        // Header strip: accent dot + folder name.
+        let header = NSView()
+        header.wantsLayer = true
+        header.layer?.backgroundColor = Palette.header.cgColor
+        header.translatesAutoresizingMaskIntoConstraints = false
+        clip.addSubview(header)
+
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = Palette.accent.cgColor
+        dot.layer?.cornerRadius = 3.5
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(dot)
+
+        let label = NSTextField(labelWithString: folder.isEmpty ? "claude" : folder)
+        label.font = NSFont(name: "SFMono-Medium", size: 11)
+            ?? .monospacedSystemFont(ofSize: 11, weight: .medium)
+        label.textColor = Palette.muted
+        label.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(label)
+
+        let term = LocalProcessTerminalView(frame: .zero)
+        term.nativeBackgroundColor = .clear
+        term.nativeForegroundColor = Palette.fg
+        term.caretColor = Palette.accent
+        term.selectedTextBackgroundColor = Palette.accent.withAlphaComponent(0.30)
+        term.font = NSFont(name: "SFMono-Regular", size: 13)
+            ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        term.translatesAutoresizingMaskIntoConstraints = false
+        clip.addSubview(term)
+
+        NSLayoutConstraint.activate([
+            clip.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            clip.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            clip.topAnchor.constraint(equalTo: card.topAnchor),
+            clip.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+
+            header.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+            header.topAnchor.constraint(equalTo: clip.topAnchor),
+            header.heightAnchor.constraint(equalToConstant: 30),
+
+            dot.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            dot.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
+
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+
+            term.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: 12),
+            term.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -12),
+            term.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            term.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -10),
+        ])
         return (card, term)
     }
 
     func show() {
-        // Promote to a regular app (Dock icon + window focus) while a space is open;
-        // reverts to accessory when the last one closes.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -111,6 +215,7 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
         onClose?(self)
     }
 }
