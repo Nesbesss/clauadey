@@ -12,6 +12,10 @@ let LOGO_KEY = "customLogoPath"
 let TERMINALS_KEY = "terminalsPerClick"
 let CAVEMAN_KEY = "autoInstallCaveman"
 let TILE_KEY = "tileTerminals"
+let SPACE_OPACITY_KEY = "spaceOpacity"   // 0.0–1.0
+let SPACE_TINT_KEY = "spaceTint"         // hex "RRGGBB"
+let SPACE_OPACITY_DEFAULT = 0.59
+let SPACE_TINT_DEFAULT = "0d0e12"
 let SESSIONS_MAX = 15
 
 // Caveman plugin (https://github.com/JuliusBrussee/caveman). Auto-installed on
@@ -42,9 +46,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var terminalsInfoLabel: NSTextField?
     var cavemanCheckbox: NSButton?
     var tileCheckbox: NSButton?
+    var spaceOpacitySlider: NSSlider?
+    var spaceOpacityLabel: NSTextField?
+    var spaceTintWell: NSColorWell?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [TERMINALS_KEY: 1, CAVEMAN_KEY: true, TILE_KEY: true])
+        UserDefaults.standard.register(defaults: [
+            TERMINALS_KEY: 1, CAVEMAN_KEY: true, TILE_KEY: true,
+            SPACE_OPACITY_KEY: SPACE_OPACITY_DEFAULT, SPACE_TINT_KEY: SPACE_TINT_DEFAULT,
+        ])
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -366,10 +376,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             runInTerminalApp(shellCmd, windows: count)
             return
         }
+        let opacity = UserDefaults.standard.object(forKey: SPACE_OPACITY_KEY) as? Double ?? SPACE_OPACITY_DEFAULT
+        let tint = UserDefaults.standard.string(forKey: SPACE_TINT_KEY) ?? SPACE_TINT_DEFAULT
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
         p.arguments = ["--cwd", cwd, "--count", "\(count)", "--cmd", shellCmd,
-                       "--title", "Claudey", "--icon", currentLogoPath()]
+                       "--title", "Claudey", "--icon", currentLogoPath(),
+                       "--opacity", String(format: "%.3f", opacity), "--tint", tint]
         p.environment = ProcessInfo.processInfo.environment
         do {
             try p.run()
@@ -490,7 +503,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func buildSettingsWindow() {
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 470),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
                            styleMask: [.titled, .closable],
                            backing: .buffered, defer: false)
         win.title = "Claudey Settings"
@@ -504,35 +517,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             content.addSubview(l)
             return l
         }
+        func note(_ text: String, _ frame: NSRect) -> NSTextField {
+            let l = label(text, frame)
+            l.font = NSFont.systemFont(ofSize: 11); l.textColor = .secondaryLabelColor
+            l.maximumNumberOfLines = 3; l.lineBreakMode = .byWordWrapping
+            return l
+        }
 
         // --- Logo ---
-        _ = label("Logo", NSRect(x: 20, y: 435, width: 200, height: 20), bold: true)
+        _ = label("Logo", NSRect(x: 20, y: 560, width: 200, height: 20), bold: true)
 
-        let preview = NSImageView(frame: NSRect(x: 20, y: 360, width: 64, height: 64))
+        let preview = NSImageView(frame: NSRect(x: 20, y: 485, width: 64, height: 64))
         preview.imageScaling = .scaleProportionallyUpOrDown
         preview.wantsLayer = true
         preview.layer?.cornerRadius = 8
         content.addSubview(preview)
         logoPreview = preview
 
-        let chooseBtn = NSButton(title: "Choose Image…", target: self,
-                                 action: #selector(chooseLogo))
-        chooseBtn.frame = NSRect(x: 100, y: 392, width: 150, height: 28)
+        let chooseBtn = NSButton(title: "Choose Image…", target: self, action: #selector(chooseLogo))
+        chooseBtn.frame = NSRect(x: 100, y: 517, width: 150, height: 28)
         chooseBtn.bezelStyle = .rounded
         content.addSubview(chooseBtn)
 
-        let resetBtn = NSButton(title: "Reset to Default", target: self,
-                                action: #selector(resetLogo))
-        resetBtn.frame = NSRect(x: 100, y: 360, width: 150, height: 28)
+        let resetBtn = NSButton(title: "Reset to Default", target: self, action: #selector(resetLogo))
+        resetBtn.frame = NSRect(x: 100, y: 485, width: 150, height: 28)
         resetBtn.bezelStyle = .rounded
         content.addSubview(resetBtn)
 
-        // Preset icons.
-        let pLabel = label("Presets", NSRect(x: 20, y: 332, width: 150, height: 16))
-        pLabel.font = NSFont.systemFont(ofSize: 11); pLabel.textColor = .secondaryLabelColor
+        let pLabel = note("Presets", NSRect(x: 20, y: 457, width: 150, height: 16))
+        pLabel.maximumNumberOfLines = 1
         let presets = ["claude", "claude2", "claude3"]
         for (i, res) in presets.enumerated() {
-            let b = NSButton(frame: NSRect(x: 20 + i * 46, y: 286, width: 40, height: 40))
+            let b = NSButton(frame: NSRect(x: 20 + i * 46, y: 411, width: 40, height: 40))
             b.bezelStyle = .shadowlessSquare
             b.imageScaling = .scaleProportionallyUpOrDown
             b.imagePosition = .imageOnly
@@ -541,61 +557,102 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 img.size = NSSize(width: 32, height: 32)
                 b.image = img
             }
-            b.tag = i
-            b.target = self
-            b.action = #selector(usePreset(_:))
+            b.tag = i; b.target = self; b.action = #selector(usePreset(_:))
             b.toolTip = "Use this icon"
             content.addSubview(b)
         }
 
         // --- Terminals per click ---
-        _ = label("Terminals per click", NSRect(x: 20, y: 250, width: 250, height: 20), bold: true)
+        _ = label("Terminals per click", NSRect(x: 20, y: 375, width: 250, height: 20), bold: true)
 
-        let stepper = NSStepper(frame: NSRect(x: 20, y: 217, width: 24, height: 28))
-        stepper.minValue = 1
-        stepper.maxValue = 8
-        stepper.increment = 1
-        stepper.valueWraps = false
-        stepper.target = self
-        stepper.action = #selector(terminalsChanged(_:))
+        let stepper = NSStepper(frame: NSRect(x: 20, y: 342, width: 24, height: 28))
+        stepper.minValue = 1; stepper.maxValue = 8; stepper.increment = 1; stepper.valueWraps = false
+        stepper.target = self; stepper.action = #selector(terminalsChanged(_:))
         content.addSubview(stepper)
         terminalsStepper = stepper
 
-        let valueLabel = label("1", NSRect(x: 54, y: 219, width: 40, height: 20))
+        let valueLabel = label("1", NSRect(x: 54, y: 344, width: 40, height: 20))
         valueLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
         terminalsValueLabel = valueLabel
 
-        let info = label("", NSRect(x: 20, y: 184, width: 360, height: 30))
-        info.font = NSFont.systemFont(ofSize: 11)
-        info.textColor = .secondaryLabelColor
+        let info = note("", NSRect(x: 20, y: 309, width: 360, height: 28))
         info.maximumNumberOfLines = 2
-        info.lineBreakMode = .byWordWrapping
         terminalsInfoLabel = info
 
         let tile = NSButton(checkboxWithTitle: "Group 2+ terminals in a Claudey space",
                             target: self, action: #selector(tileToggled(_:)))
-        tile.frame = NSRect(x: 20, y: 156, width: 360, height: 22)
+        tile.frame = NSRect(x: 20, y: 281, width: 360, height: 22)
         content.addSubview(tile)
         tileCheckbox = tile
 
+        // --- Space appearance ---
+        _ = label("Space appearance", NSRect(x: 20, y: 245, width: 250, height: 20), bold: true)
+
+        _ = note("Transparency", NSRect(x: 20, y: 222, width: 120, height: 16)).maximumNumberOfLines = 1
+        let slider = NSSlider(value: SPACE_OPACITY_DEFAULT, minValue: 0, maxValue: 1,
+                              target: self, action: #selector(spaceOpacityChanged(_:)))
+        slider.frame = NSRect(x: 130, y: 220, width: 190, height: 20)
+        slider.isContinuous = true
+        content.addSubview(slider)
+        spaceOpacitySlider = slider
+
+        let opLabel = label("59%", NSRect(x: 328, y: 220, width: 50, height: 18))
+        opLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        spaceOpacityLabel = opLabel
+
+        _ = note("Tint color", NSRect(x: 20, y: 188, width: 120, height: 16)).maximumNumberOfLines = 1
+        let well = NSColorWell(frame: NSRect(x: 130, y: 180, width: 54, height: 26))
+        well.target = self; well.action = #selector(spaceTintChanged(_:))
+        content.addSubview(well)
+        spaceTintWell = well
+
+        _ = note("Background of the multi-terminal space. 0% = fully see-through.",
+                 NSRect(x: 20, y: 150, width: 360, height: 24))
+
         // --- Caveman ---
-        _ = label("Caveman", NSRect(x: 20, y: 116, width: 250, height: 20), bold: true)
+        _ = label("Caveman", NSRect(x: 20, y: 110, width: 250, height: 20), bold: true)
 
         let cave = NSButton(checkboxWithTitle: "Auto-install Caveman on launch",
                             target: self, action: #selector(cavemanToggled(_:)))
-        cave.frame = NSRect(x: 20, y: 88, width: 360, height: 22)
+        cave.frame = NSRect(x: 20, y: 82, width: 360, height: 22)
         content.addSubview(cave)
         cavemanCheckbox = cave
 
-        let caveInfo = label(
-            "First launch installs the Caveman plugin if it’s missing, so anyone gets it without setup. Skipped once installed.",
-            NSRect(x: 20, y: 40, width: 360, height: 40))
-        caveInfo.font = NSFont.systemFont(ofSize: 11)
-        caveInfo.textColor = .secondaryLabelColor
-        caveInfo.maximumNumberOfLines = 3
-        caveInfo.lineBreakMode = .byWordWrapping
+        _ = note("First launch installs the Caveman plugin if it’s missing, so anyone gets it without setup. Skipped once installed.",
+                 NSRect(x: 20, y: 30, width: 360, height: 44))
 
         settingsWindow = win
+    }
+
+    // MARK: - Space appearance helpers
+
+    func hexFromColor(_ c: NSColor) -> String {
+        let rgb = c.usingColorSpace(.sRGB) ?? c
+        let r = Int((rgb.redComponent * 255).rounded())
+        let g = Int((rgb.greenComponent * 255).rounded())
+        let b = Int((rgb.blueComponent * 255).rounded())
+        return String(format: "%02x%02x%02x", r, g, b)
+    }
+
+    func colorFromHex(_ hex: String) -> NSColor {
+        var h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        if h.count != 6 { h = SPACE_TINT_DEFAULT }
+        let scanner = Scanner(string: h)
+        var v: UInt64 = 0
+        scanner.scanHexInt64(&v)
+        return NSColor(srgbRed: CGFloat((v >> 16) & 0xff) / 255,
+                       green: CGFloat((v >> 8) & 0xff) / 255,
+                       blue: CGFloat(v & 0xff) / 255, alpha: 1)
+    }
+
+    @objc func spaceOpacityChanged(_ sender: NSSlider) {
+        let v = sender.doubleValue
+        UserDefaults.standard.set(v, forKey: SPACE_OPACITY_KEY)
+        spaceOpacityLabel?.stringValue = "\(Int((v * 100).rounded()))%"
+    }
+
+    @objc func spaceTintChanged(_ sender: NSColorWell) {
+        UserDefaults.standard.set(hexFromColor(sender.color), forKey: SPACE_TINT_KEY)
     }
 
     func refreshSettingsUI() {
@@ -606,6 +663,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateTerminalsInfo(n)
         cavemanCheckbox?.state = UserDefaults.standard.bool(forKey: CAVEMAN_KEY) ? .on : .off
         tileCheckbox?.state = UserDefaults.standard.bool(forKey: TILE_KEY) ? .on : .off
+
+        let op = UserDefaults.standard.object(forKey: SPACE_OPACITY_KEY) as? Double ?? SPACE_OPACITY_DEFAULT
+        spaceOpacitySlider?.doubleValue = op
+        spaceOpacityLabel?.stringValue = "\(Int((op * 100).rounded()))%"
+        let tint = UserDefaults.standard.string(forKey: SPACE_TINT_KEY) ?? SPACE_TINT_DEFAULT
+        spaceTintWell?.color = colorFromHex(tint)
     }
 
     @objc func cavemanToggled(_ sender: NSButton) {

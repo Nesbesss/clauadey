@@ -16,6 +16,20 @@ struct Args {
     cmd: String,
     title: String,
     icon: Option<String>,
+    opacity: f32,
+    tint: [u8; 3],
+}
+
+fn parse_hex(s: &str) -> Option<[u8; 3]> {
+    let h = s.strip_prefix('#').unwrap_or(s);
+    if h.len() != 6 {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&h[0..2], 16).ok()?,
+        u8::from_str_radix(&h[2..4], 16).ok()?,
+        u8::from_str_radix(&h[4..6], 16).ok()?,
+    ])
 }
 
 fn parse_args() -> Args {
@@ -25,6 +39,8 @@ fn parse_args() -> Args {
         cmd: "claude".into(),
         title: "Claudey".into(),
         icon: None,
+        opacity: 0.59,
+        tint: [13, 14, 18],
     };
     let v: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -35,6 +51,13 @@ fn parse_args() -> Args {
             "--cmd" if i + 1 < v.len() => { a.cmd = v[i + 1].clone(); i += 1; }
             "--title" if i + 1 < v.len() => { a.title = v[i + 1].clone(); i += 1; }
             "--icon" if i + 1 < v.len() => { a.icon = Some(v[i + 1].clone()); i += 1; }
+            "--opacity" if i + 1 < v.len() => {
+                a.opacity = v[i + 1].parse::<f32>().unwrap_or(0.59).clamp(0.0, 1.0); i += 1;
+            }
+            "--tint" if i + 1 < v.len() => {
+                if let Some(rgb) = parse_hex(&v[i + 1]) { a.tint = rgb; }
+                i += 1;
+            }
             _ => {}
         }
         i += 1;
@@ -91,6 +114,8 @@ struct App {
     theme: TerminalTheme,
     cols: usize,
     rows: usize,
+    tint: [u8; 3],
+    opacity: f32,
 }
 
 impl App {
@@ -138,6 +163,8 @@ impl App {
             theme: TerminalTheme::new(Box::new(warp_palette())),
             cols,
             rows,
+            tint: args.tint,
+            opacity: args.opacity,
         }
     }
 }
@@ -160,8 +187,10 @@ impl eframe::App for App {
             }
         }
 
-        // Glassmorphic: translucent dark tint, bright edges, lit top + sheen.
-        let surface = Color32::from_rgba_unmultiplied(13, 14, 18, 150); // ~0.59 translucent
+        // Glassmorphic: user-tunable tint + transparency, bright edges, sheen.
+        let alpha = (self.opacity * 255.0).round() as u8;
+        let surface =
+            Color32::from_rgba_unmultiplied(self.tint[0], self.tint[1], self.tint[2], alpha);
         let divider = Color32::from_rgba_unmultiplied(255, 255, 255, 24);
         let edge = Color32::from_rgba_unmultiplied(255, 255, 255, 34);
         let highlight = Color32::from_rgba_unmultiplied(255, 255, 255, 46);
