@@ -18,4 +18,7 @@ rm -f "$DMG"
 hdiutil create -volname "$VOL" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$(dirname "$STAGE")"
 
-echo "DMG built: $DMG"
+# Keep the published site copy in sync so the download is never stale.
+cp "$DMG" docs/Claudey.dmg
+
+echo "DMG built: $DMG (and copied to docs/Claudey.dmg)"
