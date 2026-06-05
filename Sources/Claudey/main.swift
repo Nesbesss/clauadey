@@ -34,12 +34,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var frameIndex = 0
     var timer: Timer?
 
-    // Dock icon animation (only while a space window keeps the app in .regular).
-    var dockFrames: [NSImage] = []
-    var dockDelays: [Double] = []
-    var dockIndex = 0
-    var dockTimer: Timer?
-
     // Settings window refs.
     var settingsWindow: NSWindow?
     var logoPreview: NSImageView?
@@ -48,9 +42,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var terminalsInfoLabel: NSTextField?
     var cavemanCheckbox: NSButton?
     var tileCheckbox: NSButton?
-
-    // Open Claudey space windows (multi-terminal), retained while visible.
-    var spaces: [SpaceWindowController] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [TERMINALS_KEY: 1, CAVEMAN_KEY: true, TILE_KEY: true])
@@ -366,52 +357,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Space (multi-terminal Claudey window)
+    // MARK: - Space (Rust multi-terminal window)
 
+    // Launch the bundled `claudey-space` Rust binary: one window of N premium
+    // terminal panes. Falls back to N Terminal.app windows if the binary is missing.
     func openSpace(cwd: String, shellCmd: String, count: Int) {
-        let c = SpaceWindowController(cwd: cwd, shellCmd: shellCmd, count: count)
-        c.onClose = { [weak self] ctrl in self?.spaceClosed(ctrl) }
-        spaces.append(c)
-        c.show()              // promotes app to .regular → Dock icon appears
-        startDockAnimation()  // animate that Dock icon
-    }
-
-    func spaceClosed(_ c: SpaceWindowController) {
-        spaces.removeAll { $0 === c }
-        // No space windows left → stop Dock animation, return to menubar-only.
-        if spaces.isEmpty {
-            stopDockAnimation()
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
-
-    // MARK: - Dock icon animation
-
-    func startDockAnimation() {
-        stopDockAnimation()
-        let (f, d) = renderFrames(from: currentLogoPath(), size: 128)
-        guard f.count > 1 else {
-            if let one = f.first { NSApp.applicationIconImage = one }
+        guard let bin = Bundle.main.path(forResource: "claudey-space", ofType: nil) else {
+            runInTerminalApp(shellCmd, windows: count)
             return
         }
-        dockFrames = f; dockDelays = d; dockIndex = 0
-        showDockFrame()
-    }
-
-    func showDockFrame() {
-        guard !dockFrames.isEmpty else { return }
-        NSApp.applicationIconImage = dockFrames[dockIndex]
-        let delay = dockDelays[dockIndex]
-        dockIndex = (dockIndex + 1) % dockFrames.count
-        dockTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.showDockFrame()
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: bin)
+        p.arguments = ["--cwd", cwd, "--count", "\(count)", "--cmd", shellCmd, "--title", "Claudey"]
+        p.environment = ProcessInfo.processInfo.environment
+        do {
+            try p.run()
+        } catch {
+            NSLog("claudey-space launch failed: \(error)")
+            runInTerminalApp(shellCmd, windows: count)
         }
-    }
-
-    func stopDockAnimation() {
-        dockTimer?.invalidate(); dockTimer = nil
-        dockFrames = []; dockDelays = []; dockIndex = 0
-        NSApp.applicationIconImage = nil // restore the bundled AppIcon
     }
 
     // MARK: - Sessions

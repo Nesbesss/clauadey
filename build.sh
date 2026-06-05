@@ -33,7 +33,15 @@ done
 iconutil -c icns "$TMPICON/icon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$TMPICON"
 
-# Compile via SwiftPM (pulls SwiftTerm for the multi-terminal space).
+# Build the Rust space binary (egui + egui_term) and bundle it.
+echo "Building claudey-space (Rust)…"
+( cd claudey-space && cargo build --release )
+cp "claudey-space/target/release/claudey-space" "$APP/Contents/Resources/claudey-space"
+chmod +x "$APP/Contents/Resources/claudey-space"
+# Sign the nested binary first (hardened runtime) so the app can seal it.
+codesign --force --options runtime --sign "$SIGN_ID" "$APP/Contents/Resources/claudey-space"
+
+# Compile the Swift menubar app via SwiftPM.
 swift build -c release
 cp ".build/release/$BIN" "$APP/Contents/MacOS/$BIN"
 

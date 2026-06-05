@@ -1,0 +1,23 @@
+[package]
+name = "claudey-space"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "claudey-space"
+path = "src/main.rs"
+
+[dependencies]
+egui = "0.34"
+eframe = { version = "0.34", default-features = false, features = [
+    "default_fonts",
+    "wgpu",
+] }
+egui_term = { git = "https://github.com/Harzu/egui_term", branch = "main" }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
