@@ -1,0 +1,13 @@
+# Build artifacts
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+
+# Built app bundle (rebuild with ./build.sh)
+Claudey.app/
+
+# Local DMG at repo root (published copy lives in docs/)
+/Claudey.dmg
+
+.DS_Store
