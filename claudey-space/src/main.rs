@@ -45,7 +45,7 @@ fn parse_args() -> Args {
 fn warp_palette() -> ColorPalette {
     ColorPalette {
         foreground: "#f1f1f1".into(),
-        background: "#0b0c0e".into(),
+        background: "#0b0c0e00".into(), // transparent → translucent surface shows through
         black: "#616161".into(),
         red: "#ff8272".into(),
         green: "#b4fa72".into(),
@@ -160,7 +160,7 @@ impl eframe::App for App {
         }
 
         // One unified surface, split by hairlines — Warp-style, lightly transparent.
-        let surface = Color32::from_rgba_unmultiplied(12, 13, 16, 224); // ~0.88, dark
+        let surface = Color32::from_rgba_unmultiplied(12, 13, 16, 205); // ~0.80, lightly transparent
         let divider = Color32::from_rgba_unmultiplied(255, 255, 255, 20);
         let edge = Color32::from_rgba_unmultiplied(255, 255, 255, 14);
         let accent = Color32::from_rgb(0xd9, 0x77, 0x57);

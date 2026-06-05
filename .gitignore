@@ -4,6 +4,10 @@
 DerivedData/
 *.xcodeproj
 
+# Rust build output
+target/
+**/target/
+
 # Built app bundle (rebuild with ./build.sh)
 Claudey.app/
 
