@@ -1,16 +1,30 @@
 import Cocoa
 import SwiftTerm
 
-// Premium palette (Warp-like: deep slate, crisp text, one warm accent).
+// Premium palette — near-black like Warp's default dark, warm Claude accent.
 private enum Palette {
-    static let windowTop = NSColor(srgbRed: 0.075, green: 0.082, blue: 0.098, alpha: 1)   // #131520
-    static let windowBot = NSColor(srgbRed: 0.051, green: 0.055, blue: 0.067, alpha: 1)   // #0d0e11
-    static let pane      = NSColor(srgbRed: 0.086, green: 0.102, blue: 0.129, alpha: 0.97) // #161a21
-    static let header    = NSColor(srgbRed: 0.11,  green: 0.13,  blue: 0.16,  alpha: 0.96)
-    static let fg        = NSColor(srgbRed: 0.91,  green: 0.92,  blue: 0.94,  alpha: 1)
-    static let muted     = NSColor(srgbRed: 0.56,  green: 0.59,  blue: 0.65,  alpha: 1)
-    static let accent    = NSColor(srgbRed: 0.85,  green: 0.46,  blue: 0.34,  alpha: 1)    // #d97757
+    static let windowTop = NSColor(srgbRed: 0.043, green: 0.047, blue: 0.055, alpha: 1)   // #0b0c0e
+    static let windowBot = NSColor(srgbRed: 0.024, green: 0.027, blue: 0.031, alpha: 1)   // #060708
+    static let pane      = NSColor(srgbRed: 0.043, green: 0.047, blue: 0.055, alpha: 1)   // #0b0c0e
+    static let header    = NSColor(srgbRed: 0.063, green: 0.067, blue: 0.078, alpha: 1)   // #101114
+    static let fg        = NSColor(srgbRed: 0.945, green: 0.945, blue: 0.945, alpha: 1)   // #f1f1f1
+    static let muted     = NSColor(srgbRed: 0.49,  green: 0.53,  blue: 0.58,  alpha: 1)
+    static let accent    = NSColor(srgbRed: 0.85,  green: 0.46,  blue: 0.34,  alpha: 1)   // #d97757
     static let border    = NSColor(white: 1, alpha: 0.07)
+    static let sep       = NSColor(white: 1, alpha: 0.06)
+}
+
+// Warp default-dark 16-color ANSI palette (normal 0–7, bright 8–15).
+private func warpAnsiPalette() -> [SwiftTerm.Color] {
+    func c(_ r: Int, _ g: Int, _ b: Int) -> SwiftTerm.Color {
+        SwiftTerm.Color(red: UInt16(r) * 257, green: UInt16(g) * 257, blue: UInt16(b) * 257)
+    }
+    return [
+        c(0x61,0x61,0x61), c(0xff,0x82,0x72), c(0xb4,0xfa,0x72), c(0xfe,0xfd,0xc2),
+        c(0xa5,0xd5,0xfe), c(0xff,0x8f,0xfd), c(0xd0,0xd1,0xfe), c(0xf1,0xf1,0xf1),
+        c(0x8e,0x8e,0x8e), c(0xff,0xc4,0xbd), c(0xd6,0xfc,0xb9), c(0xfe,0xfd,0xd5),
+        c(0xc1,0xe3,0xfe), c(0xff,0xb1,0xfe), c(0xe5,0xe6,0xfe), c(0xfe,0xff,0xff),
+    ]
 }
 
 // Tiles panes in a grid; reserves space at top for the transparent titlebar.
@@ -149,12 +163,18 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
         clip.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(clip)
 
-        // Header strip: accent dot + folder name.
+        // Header strip: accent dot + folder name, with a hairline separator.
         let header = NSView()
         header.wantsLayer = true
         header.layer?.backgroundColor = Palette.header.cgColor
         header.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(header)
+
+        let sep = NSView()
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = Palette.sep.cgColor
+        sep.translatesAutoresizingMaskIntoConstraints = false
+        clip.addSubview(sep)
 
         let dot = NSView()
         dot.wantsLayer = true
@@ -171,12 +191,13 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
         header.addSubview(label)
 
         let term = LocalProcessTerminalView(frame: .zero)
-        term.nativeBackgroundColor = .clear
+        term.nativeBackgroundColor = Palette.pane
         term.nativeForegroundColor = Palette.fg
         term.caretColor = Palette.accent
         term.selectedTextBackgroundColor = Palette.accent.withAlphaComponent(0.30)
         term.font = NSFont(name: "SFMono-Regular", size: 13)
             ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        term.installColors(warpAnsiPalette()) // Warp's exact ANSI colors
         term.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(term)
 
@@ -189,7 +210,12 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
             header.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
             header.topAnchor.constraint(equalTo: clip.topAnchor),
-            header.heightAnchor.constraint(equalToConstant: 30),
+            header.heightAnchor.constraint(equalToConstant: 28),
+
+            sep.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            sep.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+            sep.topAnchor.constraint(equalTo: header.bottomAnchor),
+            sep.heightAnchor.constraint(equalToConstant: 1),
 
             dot.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
             dot.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -201,7 +227,7 @@ final class SpaceWindowController: NSWindowController, NSWindowDelegate {
 
             term.leadingAnchor.constraint(equalTo: clip.leadingAnchor, constant: 12),
             term.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -12),
-            term.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            term.topAnchor.constraint(equalTo: sep.bottomAnchor, constant: 8),
             term.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -10),
         ])
         return (card, term)
