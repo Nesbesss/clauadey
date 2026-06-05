@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use egui::{Color32, CornerRadius, FontId, Frame, Margin, RichText, Stroke, Vec2};
+use egui::{
+    pos2, vec2, Align2, Color32, CornerRadius, FontId, Rect, Stroke, StrokeKind, UiBuilder,
+};
 use egui_term::{
     BackendSettings, ColorPalette, FontSettings, PtyEvent, TerminalBackend, TerminalFont,
     TerminalTheme, TerminalView,
@@ -14,6 +16,7 @@ struct Args {
     count: usize,
     cmd: String,
     title: String,
+    icon: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -22,6 +25,7 @@ fn parse_args() -> Args {
         count: 2,
         cmd: "claude".into(),
         title: "Claudey".into(),
+        icon: None,
     };
     let v: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -31,6 +35,7 @@ fn parse_args() -> Args {
             "--count" if i + 1 < v.len() => { a.count = v[i + 1].parse().unwrap_or(2); i += 1; }
             "--cmd" if i + 1 < v.len() => { a.cmd = v[i + 1].clone(); i += 1; }
             "--title" if i + 1 < v.len() => { a.title = v[i + 1].clone(); i += 1; }
+            "--icon" if i + 1 < v.len() => { a.icon = Some(v[i + 1].clone()); i += 1; }
             _ => {}
         }
         i += 1;
@@ -70,6 +75,12 @@ fn warp_palette() -> ColorPalette {
         dim_cyan: "#4d7770".into(),
         dim_white: "#8e8e8e".into(),
     }
+}
+
+fn load_icon(path: &str) -> Option<egui::IconData> {
+    let img = image::open(path).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some(egui::IconData { rgba: img.into_raw(), width: w, height: h })
 }
 
 struct App {
@@ -112,12 +123,11 @@ impl App {
         let cols = (count as f32).sqrt().ceil() as usize;
         let rows = (count + cols - 1) / cols;
 
-        // Premium near-black chrome.
+        // Transparent visuals; we paint our own translucent cards.
         let mut visuals = egui::Visuals::dark();
-        let bg = Color32::from_rgb(0x08, 0x09, 0x0b);
-        visuals.panel_fill = bg;
-        visuals.window_fill = bg;
-        visuals.extreme_bg_color = bg;
+        visuals.panel_fill = Color32::TRANSPARENT;
+        visuals.window_fill = Color32::TRANSPARENT;
+        visuals.extreme_bg_color = Color32::from_rgb(0x0b, 0x0c, 0x0e);
         cc.egui_ctx.set_visuals(visuals);
 
         Self {
@@ -134,11 +144,13 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn clear_color(&self, _v: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0] // transparent window
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Keep terminals live (cursor blink + prompt output render promptly).
         ui.ctx().request_repaint();
 
-        // Drain PTY events; close window when every pane has exited.
         while let Ok((_, ev)) = self.rx.try_recv() {
             if let PtyEvent::Exit = ev {
                 self.live = self.live.saturating_sub(1);
@@ -149,15 +161,12 @@ impl eframe::App for App {
             }
         }
 
-        let pane_bg = Color32::from_rgb(0x0b, 0x0c, 0x0e);
-        let header_bg = Color32::from_rgb(0x10, 0x11, 0x14);
-        let border = Color32::from_rgba_unmultiplied(255, 255, 255, 18);
+        // Warp-like translucent palette.
+        let pane_bg = Color32::from_rgba_unmultiplied(14, 15, 18, 214); // ~0.84
+        let header_text = Color32::from_rgb(0x9a, 0x9f, 0xa8);
+        let border = Color32::from_rgba_unmultiplied(255, 255, 255, 22);
+        let sep = Color32::from_rgba_unmultiplied(255, 255, 255, 16);
         let accent = Color32::from_rgb(0xd9, 0x77, 0x57);
-        let muted = Color32::from_rgb(0x8a, 0x8f, 0x98);
-        let window_bg = Color32::from_rgb(0x08, 0x09, 0x0b);
-
-        // Paint the window background (no CentralPanel in this eframe variant).
-        ui.painter().rect_filled(ui.max_rect(), CornerRadius::ZERO, window_bg);
 
         let theme = self.theme.clone();
         let active = self.active;
@@ -168,76 +177,72 @@ impl eframe::App for App {
         let backends = &mut self.backends;
         let mut clicked: Option<usize> = None;
 
-        let gap = 10.0;
-        let avail = ui.available_size();
-        let cw = ((avail.x - gap * (cols as f32 - 1.0)) / cols as f32).max(80.0);
-        let ch = ((avail.y - gap * (rows as f32 - 1.0)) / rows as f32).max(60.0);
-        ui.spacing_mut().item_spacing = Vec2::splat(gap);
+        let painter = ui.painter().clone();
+        let area = ui.max_rect();
+        let pad = 12.0;
+        let gap = 12.0;
+        let header_h = 30.0;
+        let inner = area.shrink(pad);
+        let cw = (inner.width() - gap * (cols as f32 - 1.0)) / cols as f32;
+        let ch = (inner.height() - gap * (rows as f32 - 1.0)) / rows as f32;
+        let radius = CornerRadius::same(13);
 
-        let mut idx = 0usize;
-        ui.vertical(|ui| {
-            for _r in 0..rows {
-                ui.horizontal(|ui| {
-                    for _c in 0..cols {
-                        if idx >= n {
-                            break;
-                        }
-                        let i = idx;
-                        idx += 1;
-                        let is_active = i == active;
-                        let stroke = if is_active {
-                            Stroke::new(1.5, accent)
-                        } else {
-                            Stroke::new(1.0, border)
-                        };
-                        ui.allocate_ui(Vec2::new(cw, ch), |ui| {
-                            Frame::default()
-                                .fill(pane_bg)
-                                .corner_radius(CornerRadius::same(12))
-                                .stroke(stroke)
-                                .inner_margin(Margin::same(0))
-                                .show(ui, |ui| {
-                                    ui.set_min_size(Vec2::new(cw, ch));
-                                    // Header strip: accent dot + folder.
-                                    Frame::default()
-                                        .fill(header_bg)
-                                        .inner_margin(Margin::symmetric(12, 6))
-                                        .show(ui, |ui| {
-                                            ui.set_width(ui.available_width());
-                                            ui.horizontal(|ui| {
-                                                let (r, _) = ui.allocate_exact_size(
-                                                    Vec2::new(7.0, 7.0),
-                                                    egui::Sense::hover(),
-                                                );
-                                                ui.painter().circle_filled(r.center(), 3.5, accent);
-                                                ui.label(
-                                                    RichText::new(&folder)
-                                                        .color(muted)
-                                                        .monospace()
-                                                        .size(11.0),
-                                                );
-                                            });
-                                        });
-                                    // Terminal fills the rest of the card (explicit
-                                    // size — available_size() can collapse to zero).
-                                    let term_size =
-                                        Vec2::new((cw - 2.0).max(40.0), (ch - 32.0).max(40.0));
-                                    let term = TerminalView::new(ui, &mut backends[i])
-                                        .set_focus(is_active)
-                                        .set_theme(theme.clone())
-                                        .set_font(TerminalFont::new(FontSettings {
-                                            font_type: FontId::monospace(13.0),
-                                        }))
-                                        .set_size(term_size);
-                                    if ui.add(term).clicked() {
-                                        clicked = Some(i);
-                                    }
-                                });
-                        });
-                    }
-                });
+        for i in 0..n {
+            let r = i / cols;
+            let c = i % cols;
+            let x = inner.left() + c as f32 * (cw + gap);
+            let y = inner.top() + r as f32 * (ch + gap);
+            let cell = Rect::from_min_size(pos2(x, y), vec2(cw, ch));
+            let is_active = i == active;
+
+            // Card background.
+            painter.rect_filled(cell, radius, pane_bg);
+
+            // Header: accent dot + folder name + hairline separator.
+            let hy = cell.top() + header_h / 2.0;
+            painter.circle_filled(pos2(cell.left() + pad + 3.0, hy), 3.5, accent);
+            painter.text(
+                pos2(cell.left() + pad + 14.0, hy),
+                Align2::LEFT_CENTER,
+                &folder,
+                FontId::monospace(11.0),
+                header_text,
+            );
+            let sepy = cell.top() + header_h;
+            painter.line_segment(
+                [pos2(cell.left() + 1.0, sepy), pos2(cell.right() - 1.0, sepy)],
+                Stroke::new(1.0, sep),
+            );
+
+            // Terminal in the remaining area.
+            let term_rect = Rect::from_min_max(
+                pos2(cell.left() + 12.0, sepy + 8.0),
+                pos2(cell.right() - 12.0, cell.bottom() - 10.0),
+            );
+            let resp = ui
+                .allocate_new_ui(UiBuilder::new().max_rect(term_rect), |ui| {
+                    let term = TerminalView::new(ui, &mut backends[i])
+                        .set_focus(is_active)
+                        .set_theme(theme.clone())
+                        .set_font(TerminalFont::new(FontSettings {
+                            font_type: FontId::monospace(13.0),
+                        }))
+                        .set_size(term_rect.size());
+                    ui.add(term)
+                })
+                .inner;
+            if resp.clicked() {
+                clicked = Some(i);
             }
-        });
+
+            // Border / active ring on top.
+            let stroke = if is_active {
+                Stroke::new(1.5, accent)
+            } else {
+                Stroke::new(1.0, border)
+            };
+            painter.rect_stroke(cell, radius, stroke, StrokeKind::Inside);
+        }
 
         if let Some(i) = clicked {
             self.active = i;
@@ -249,11 +254,20 @@ fn main() -> eframe::Result {
     env_logger::init();
     let args = parse_args();
     let app_name = args.title.clone();
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1160.0, 760.0])
+        .with_min_inner_size([560.0, 380.0])
+        .with_title(&app_name)
+        .with_transparent(true);
+    if let Some(p) = &args.icon {
+        if let Some(icon) = load_icon(p) {
+            viewport = viewport.with_icon(std::sync::Arc::new(icon));
+        }
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1160.0, 760.0])
-            .with_min_inner_size([560.0, 380.0])
-            .with_title(&app_name),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(

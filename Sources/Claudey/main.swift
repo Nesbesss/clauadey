@@ -368,7 +368,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
-        p.arguments = ["--cwd", cwd, "--count", "\(count)", "--cmd", shellCmd, "--title", "Claudey"]
+        p.arguments = ["--cwd", cwd, "--count", "\(count)", "--cmd", shellCmd,
+                       "--title", "Claudey", "--icon", currentLogoPath()]
         p.environment = ProcessInfo.processInfo.environment
         do {
             try p.run()
