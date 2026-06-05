@@ -1,7 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use egui::{pos2, vec2, Color32, CornerRadius, FontId, Rect, Stroke, StrokeKind, UiBuilder};
+use egui::epaint::{Mesh, Vertex, WHITE_UV};
+use egui::{pos2, vec2, Color32, CornerRadius, FontId, Rect, Shape, Stroke, StrokeKind, UiBuilder};
 use egui_term::{
     BackendSettings, ColorPalette, FontSettings, PtyEvent, TerminalBackend, TerminalFont,
     TerminalTheme, TerminalView,
@@ -159,10 +160,11 @@ impl eframe::App for App {
             }
         }
 
-        // One unified surface, split by hairlines — Warp-style, lightly transparent.
-        let surface = Color32::from_rgba_unmultiplied(12, 13, 16, 205); // ~0.80, lightly transparent
-        let divider = Color32::from_rgba_unmultiplied(255, 255, 255, 20);
-        let edge = Color32::from_rgba_unmultiplied(255, 255, 255, 14);
+        // Glassmorphic: translucent dark tint, bright edges, lit top + sheen.
+        let surface = Color32::from_rgba_unmultiplied(13, 14, 18, 150); // ~0.59 translucent
+        let divider = Color32::from_rgba_unmultiplied(255, 255, 255, 24);
+        let edge = Color32::from_rgba_unmultiplied(255, 255, 255, 34);
+        let highlight = Color32::from_rgba_unmultiplied(255, 255, 255, 46);
         let accent = Color32::from_rgb(0xd9, 0x77, 0x57);
 
         let theme = self.theme.clone();
@@ -177,9 +179,31 @@ impl eframe::App for App {
         let area = ui.max_rect();
         let radius = CornerRadius::same(12);
 
-        // Single panel background + subtle outer edge.
+        // Single panel: translucent tint + outer edge.
         painter.rect_filled(area, radius, surface);
+
+        // Glass sheen: a soft white gradient fading down from the top.
+        let sheen_h = (area.height() * 0.45).min(180.0);
+        let c_top = Color32::from_rgba_unmultiplied(255, 255, 255, 20);
+        let c_bot = Color32::from_rgba_unmultiplied(255, 255, 255, 0);
+        let mut mesh = Mesh::default();
+        let tl = pos2(area.left(), area.top());
+        let tr = pos2(area.right(), area.top());
+        let bl = pos2(area.left(), area.top() + sheen_h);
+        let br = pos2(area.right(), area.top() + sheen_h);
+        mesh.vertices.push(Vertex { pos: tl, uv: WHITE_UV, color: c_top });
+        mesh.vertices.push(Vertex { pos: tr, uv: WHITE_UV, color: c_top });
+        mesh.vertices.push(Vertex { pos: br, uv: WHITE_UV, color: c_bot });
+        mesh.vertices.push(Vertex { pos: bl, uv: WHITE_UV, color: c_bot });
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+        painter.with_clip_rect(area).add(Shape::mesh(mesh));
+
+        // Bright edge + lit top highlight.
         painter.rect_stroke(area, radius, Stroke::new(1.0, edge), StrokeKind::Inside);
+        painter.line_segment(
+            [pos2(area.left() + 14.0, area.top() + 1.5), pos2(area.right() - 14.0, area.top() + 1.5)],
+            Stroke::new(1.0, highlight),
+        );
 
         // Edge-to-edge cells (no gaps); terminal padded inside.
         let cw = area.width() / cols as f32;
