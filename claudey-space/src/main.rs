@@ -1,9 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use egui::{
-    pos2, vec2, Align2, Color32, CornerRadius, FontId, Rect, Stroke, StrokeKind, UiBuilder,
-};
+use egui::{pos2, vec2, Color32, CornerRadius, FontId, Rect, Stroke, StrokeKind, UiBuilder};
 use egui_term::{
     BackendSettings, ColorPalette, FontSettings, PtyEvent, TerminalBackend, TerminalFont,
     TerminalTheme, TerminalView,
@@ -161,63 +159,45 @@ impl eframe::App for App {
             }
         }
 
-        // Warp-like translucent palette.
-        let pane_bg = Color32::from_rgba_unmultiplied(14, 15, 18, 214); // ~0.84
-        let header_text = Color32::from_rgb(0x9a, 0x9f, 0xa8);
-        let border = Color32::from_rgba_unmultiplied(255, 255, 255, 22);
-        let sep = Color32::from_rgba_unmultiplied(255, 255, 255, 16);
+        // One unified surface, split by hairlines — Warp-style, lightly transparent.
+        let surface = Color32::from_rgba_unmultiplied(12, 13, 16, 224); // ~0.88, dark
+        let divider = Color32::from_rgba_unmultiplied(255, 255, 255, 20);
+        let edge = Color32::from_rgba_unmultiplied(255, 255, 255, 14);
         let accent = Color32::from_rgb(0xd9, 0x77, 0x57);
 
         let theme = self.theme.clone();
         let active = self.active;
         let cols = self.cols;
         let rows = self.rows;
-        let folder = self.folder.clone();
         let n = self.backends.len();
         let backends = &mut self.backends;
         let mut clicked: Option<usize> = None;
 
         let painter = ui.painter().clone();
         let area = ui.max_rect();
-        let pad = 12.0;
-        let gap = 12.0;
-        let header_h = 30.0;
-        let inner = area.shrink(pad);
-        let cw = (inner.width() - gap * (cols as f32 - 1.0)) / cols as f32;
-        let ch = (inner.height() - gap * (rows as f32 - 1.0)) / rows as f32;
-        let radius = CornerRadius::same(13);
+        let radius = CornerRadius::same(12);
+
+        // Single panel background + subtle outer edge.
+        painter.rect_filled(area, radius, surface);
+        painter.rect_stroke(area, radius, Stroke::new(1.0, edge), StrokeKind::Inside);
+
+        // Edge-to-edge cells (no gaps); terminal padded inside.
+        let cw = area.width() / cols as f32;
+        let ch = area.height() / rows as f32;
+        let inset = 12.0;
 
         for i in 0..n {
             let r = i / cols;
             let c = i % cols;
-            let x = inner.left() + c as f32 * (cw + gap);
-            let y = inner.top() + r as f32 * (ch + gap);
-            let cell = Rect::from_min_size(pos2(x, y), vec2(cw, ch));
+            let cell = Rect::from_min_size(
+                pos2(area.left() + c as f32 * cw, area.top() + r as f32 * ch),
+                vec2(cw, ch),
+            );
             let is_active = i == active;
 
-            // Card background.
-            painter.rect_filled(cell, radius, pane_bg);
-
-            // Header: accent dot + folder name + hairline separator.
-            let hy = cell.top() + header_h / 2.0;
-            painter.circle_filled(pos2(cell.left() + pad + 3.0, hy), 3.5, accent);
-            painter.text(
-                pos2(cell.left() + pad + 14.0, hy),
-                Align2::LEFT_CENTER,
-                &folder,
-                FontId::monospace(11.0),
-                header_text,
-            );
-            let sepy = cell.top() + header_h;
-            painter.line_segment(
-                [pos2(cell.left() + 1.0, sepy), pos2(cell.right() - 1.0, sepy)],
-                Stroke::new(1.0, sep),
-            );
-
-            // Terminal in the remaining area.
             let term_rect = Rect::from_min_max(
-                pos2(cell.left() + 12.0, sepy + 8.0),
-                pos2(cell.right() - 12.0, cell.bottom() - 10.0),
+                pos2(cell.left() + inset, cell.top() + inset),
+                pos2(cell.right() - inset, cell.bottom() - inset),
             );
             let resp = ui
                 .allocate_new_ui(UiBuilder::new().max_rect(term_rect), |ui| {
@@ -235,13 +215,32 @@ impl eframe::App for App {
                 clicked = Some(i);
             }
 
-            // Border / active ring on top.
-            let stroke = if is_active {
-                Stroke::new(1.5, accent)
-            } else {
-                Stroke::new(1.0, border)
-            };
-            painter.rect_stroke(cell, radius, stroke, StrokeKind::Inside);
+            // Active pane: thin accent bar along its top edge (subtle, Warp-like).
+            if is_active && n > 1 {
+                painter.line_segment(
+                    [
+                        pos2(cell.left() + 2.0, cell.top() + 1.0),
+                        pos2(cell.right() - 2.0, cell.top() + 1.0),
+                    ],
+                    Stroke::new(2.0, accent),
+                );
+            }
+        }
+
+        // Hairline dividers between panes.
+        for c in 1..cols {
+            let x = area.left() + c as f32 * cw;
+            painter.line_segment(
+                [pos2(x, area.top() + 6.0), pos2(x, area.bottom() - 6.0)],
+                Stroke::new(1.0, divider),
+            );
+        }
+        for r in 1..rows {
+            let y = area.top() + r as f32 * ch;
+            painter.line_segment(
+                [pos2(area.left() + 6.0, y), pos2(area.right() - 6.0, y)],
+                Stroke::new(1.0, divider),
+            );
         }
 
         if let Some(i) = clicked {
